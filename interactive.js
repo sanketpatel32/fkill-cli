@@ -151,6 +151,21 @@ const searchProcessesByName = (processes, term, searcher, flags = {}) => {
 	return [...exactMatches, ...startsWithMatches, ...containsMatches, ...fuzzyResults];
 };
 
+const groupProcessesByName = processes => {
+	const groups = new Map();
+
+	for (const process_ of processes) {
+		const group = groups.get(process_.name);
+		if (group) {
+			group.push(process_);
+		} else {
+			groups.set(process_.name, [process_]);
+		}
+	}
+
+	return groups;
+};
+
 const filterAndSortProcesses = (processes, term, searcher, flags) => {
 	const filtered = processes.filter(process_ => !isHelperProcess(process_));
 
@@ -251,21 +266,63 @@ const findPortsForProcess = (processId, portToPidMap) => {
 	return ports;
 };
 
+const renderGroupForDisplay = (name, count) => ({
+	name: `${name} ${chalk.dim(`(${count} processes)`)}`,
+	value: {group: name},
+});
+
+const promptGroupAction = async (name, processes, flags) => {
+	const memoryThreshold = flags.verbose ? 0 : 1;
+	const cpuThreshold = flags.verbose ? 0 : 3;
+	const {action} = await inquirer.prompt([{
+		type: 'list',
+		name: 'action',
+		message: `${processes.length} processes named "${name}":`,
+		choices: [
+			{
+				name: `Kill all ${processes.length} processes`,
+				value: 'all',
+			},
+			new inquirer.Separator(),
+			...processes.map(process_ => renderProcessForDisplay(process_, flags, memoryThreshold, cpuThreshold)),
+		],
+	}]);
+
+	return action === 'all' ? processes.map(process_ => process_.pid) : action;
+};
+
 const listProcesses = async (processes, flags) => {
 	const memoryThreshold = flags.verbose ? 0 : 1;
 	const cpuThreshold = flags.verbose ? 0 : 3;
 	const searcher = new FuzzySearch(processes, ['name'], {caseSensitive: false});
+	const groups = new Map();
 
-	const selectedPid = await search({
+	const selection = await search({
 		message: 'Running processes:',
 		pageSize: 10,
 		async source(term = '') {
 			const matchingProcesses = filterAndSortProcesses(processes, term, searcher, flags);
-			return matchingProcesses.map(process_ => renderProcessForDisplay(process_, flags, memoryThreshold, cpuThreshold));
+			groups.clear();
+
+			const choices = [];
+			for (const [name, group] of groupProcessesByName(matchingProcesses)) {
+				if (group.length === 1) {
+					choices.push(renderProcessForDisplay(group[0], flags, memoryThreshold, cpuThreshold));
+				} else {
+					choices.push(renderGroupForDisplay(name, group.length));
+					groups.set(name, group);
+				}
+			}
+
+			return choices;
 		},
 	});
 
-	performKillSequence(selectedPid);
+	const pids = typeof selection === 'number'
+		? selection
+		: await promptGroupAction(selection.group, groups.get(selection.group), flags);
+
+	performKillSequence(pids);
 };
 
 const init = async flags => {
@@ -284,4 +341,4 @@ const init = async flags => {
 	listProcesses(processesWithPorts, flags);
 };
 
-export {init, handleFkillError};
+export {init, handleFkillError, groupProcessesByName};

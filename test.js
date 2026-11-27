@@ -97,3 +97,16 @@ test('silent flag with -s shortflag works', async t => {
 	const {exitCode} = await execa('./cli.js', ['-s', '--force', ':1337']);
 	t.is(exitCode, 0);
 });
+
+test('groupProcessesByName groups same-name processes', async t => {
+	const {groupProcessesByName} = await import('./interactive.js');
+	const groups = groupProcessesByName([
+		{pid: 1, name: 'node'},
+		{pid: 2, name: 'node'},
+		{pid: 3, name: 'bash'},
+	]);
+
+	t.is(groups.size, 2);
+	t.deepEqual(groups.get('node').map(process_ => process_.pid), [1, 2]);
+	t.deepEqual(groups.get('bash').map(process_ => process_.pid), [3]);
+});
