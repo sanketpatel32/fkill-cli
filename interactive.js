@@ -251,21 +251,47 @@ const findPortsForProcess = (processId, portToPidMap) => {
 	return ports;
 };
 
+const killAllChoice = 'kill-all-matching';
+
 const listProcesses = async (processes, flags) => {
 	const memoryThreshold = flags.verbose ? 0 : 1;
 	const cpuThreshold = flags.verbose ? 0 : 3;
 	const searcher = new FuzzySearch(processes, ['name'], {caseSensitive: false});
+	let matchingProcesses = [];
 
-	const selectedPid = await search({
+	const selection = await search({
 		message: 'Running processes:',
 		pageSize: 10,
 		async source(term = '') {
-			const matchingProcesses = filterAndSortProcesses(processes, term, searcher, flags);
-			return matchingProcesses.map(process_ => renderProcessForDisplay(process_, flags, memoryThreshold, cpuThreshold));
+			matchingProcesses = filterAndSortProcesses(processes, term, searcher, flags);
+			const choices = matchingProcesses.map(process_ => renderProcessForDisplay(process_, flags, memoryThreshold, cpuThreshold));
+
+			if (term && matchingProcesses.length > 1) {
+				choices.unshift({
+					name: chalk.yellow(`Kill all ${matchingProcesses.length} matching processes`),
+					value: killAllChoice,
+				});
+			}
+
+			return choices;
 		},
 	});
 
-	performKillSequence(selectedPid);
+	if (selection === killAllChoice) {
+		const answer = await inquirer.prompt([{
+			type: 'confirm',
+			name: 'killAll',
+			message: `Kill all ${matchingProcesses.length} matching processes?`,
+		}]);
+
+		if (answer.killAll) {
+			await performKillSequence(matchingProcesses.map(process_ => process_.pid));
+		}
+
+		return;
+	}
+
+	performKillSequence(selection);
 };
 
 const init = async flags => {
